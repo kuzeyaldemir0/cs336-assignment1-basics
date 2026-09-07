@@ -1,33 +1,37 @@
+import pickle
+import time
+
+import regex as re
+
 from collections import defaultdict
 
-corpus = "low low low low low lower lower widest widest widest newest newest newest newest newest newest"
+import cs336_basics
 
-def vocab_init():
+
+def int_byte_vocab_init(special_tokens: list[str]) -> dict[int, bytes]:
     vocab = {}
     for i in range(256):
-        vocab[bytes([i])] = i
-    vocab[b"<|endoftext|>"] = 256
+        vocab[i] = bytes([i])
+    for idx, token in enumerate(special_tokens):
+        vocab[256 + idx] = token.encode("utf-8")
     return vocab
 
-def word_counter(words):
-    word_freqs = defaultdict(int)
-    for word in words:
-        word_freqs[word] += 1
-    return word_freqs
 
-def word_to_tuple_of_bytes(word_freqs):
+def pre_token_to_tuple_of_bytes(
+        pre_token_freqs: defaultdict[str, int]
+) -> dict[tuple[bytes, ...], int]:
     bytes_freqs = {}
-    for word, occurence in word_freqs.items():
-        # Encode the word to bytes
-        byte_data = word.encode("utf-8")
+    for pre_token, occurence in pre_token_freqs.items():
+        byte_data = pre_token.encode("utf-8")
+
         # Use a comprehension to split them into single bytes objects
-        single_bytes = tuple(bytes([b]) for b in byte_data)
-        bytes_freqs[single_bytes] = occurence
+        tuple_of_bytes = tuple(bytes([b]) for b in byte_data)
+        bytes_freqs[tuple_of_bytes] = occurence
     return bytes_freqs
 
-def successive_pair_freq(bytes_freqs):
+
+def successive_pair_freq(bytes_freqs: defaultdict) -> defaultdict:
     pair_freqs = defaultdict(int)
-    # Loop over each tuple
     for bytes_tuple, occurence in bytes_freqs.items():
         # Loop over each successive pair
         for i in range(len(bytes_tuple) - 1):
@@ -35,9 +39,10 @@ def successive_pair_freq(bytes_freqs):
             pair_freqs[(bytes_tuple[i], bytes_tuple[i+1])] += occurence
     return pair_freqs
 
+
 def merge_pair(bytes_freqs, pair):
     new_byte_freqs = {}
-    # Walk through each tuple of bytes, merge bytes objects if they're pair
+    # Walk through each tuple of bytes, merge bytes objects if they're our pair
     for bytes_tuple, occurence in bytes_freqs.items():
         bytes_list = []
         i = 0
@@ -75,35 +80,79 @@ def merge_pair(bytes_freqs, pair):
     return new_byte_freqs
 
 
-if __name__ == "__main__":
-    # Init the vocab
-    vocab = vocab_init()
+def train_bpe(
+    input_path: str,
+    vocab_size: int,
+    special_tokens: list[str],
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
 
-    # Pre-tokenize the corpus
-    pre_tokenized_words = corpus.split(" ")
+    # Initialize vocabulary
+    vocab = int_byte_vocab_init(special_tokens)
 
-    # Count each word's occurence
-    word_freqs = word_counter(pre_tokenized_words)
+    # Read the validation set for faster debugging
+    with open(input_path, "r", encoding="utf-8") as f:
+        corpus = f.read()
+        # Validation has 22,493,387 chars
 
-    # Convert words to tuple of bytes 
-    bytes_freqs = word_to_tuple_of_bytes(word_freqs)
+    # Escape the '|' in special tokens
+    escaped_special_tokens = []
+    for sp_token in special_tokens:
+        escaped_special_tokens.append(re.escape(sp_token))
 
-    print("Original Byte freqs:", bytes_freqs)
-    num_merges = 6
+    # Join all the special tokens with or ('|') operator for the regex pattern
+    special_token_pattern = "|".join(escaped_special_tokens)
+
+    # Split the corpus on each special token
+    chunks = re.split(special_token_pattern, corpus)
+
+    # Pre-tokenize and combine the frequencies of pre-tokens across chunks
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    pre_token_freqs = defaultdict(int)
+    for chunk in chunks:
+        # Pre-tokenize and add the frequency of pre-token
+        for match in re.finditer(PAT, chunk):
+            pre_token = match.group()
+            pre_token_freqs[pre_token] += 1
+
+    # Convert the str type pre-token object to tuple of bytes for each pre-token
+    bytes_freqs = pre_token_to_tuple_of_bytes(pre_token_freqs)
+
+    # Start merging
+    merges = []
+    num_merges = vocab_size - (len(special_tokens) + 256)
     for i in range(num_merges):
-        print(f"Iteration {i+1}")
-
-        # Count the frequency of each successive pair
+        # Count successive pairs of bytes objects in each tuple of bytes across all chunks
         pair_freqs = successive_pair_freq(bytes_freqs)
-        
-        # Choose the most frequent pair. If tied,
-        # take the alphabetically greater pair
-        most_freq_pair = max(pair_freqs, key=lambda pair: (pair_freqs[pair], pair))
-        print("Most frequent pair:", most_freq_pair)
 
-        # Merge the most frequent pair and return the new bytes_freq dict
-        bytes_freqs = merge_pair(bytes_freqs, most_freq_pair)
-        print("New Byte freqs:", bytes_freqs)
+        # Select the most frequent successive pair across chunks
+        # If tied, take the alphabetically greater/latter pair
+        most_frequent_pair = max(pair_freqs, key=lambda pair: (pair_freqs[pair], pair))
 
-        # Add the merged pair to our vocab
-        vocab[most_freq_pair[0] + most_freq_pair[1]] = 257 + i
+        # Merge the most frequent pair across all the chunks
+        bytes_freqs = merge_pair(bytes_freqs, most_frequent_pair)
+
+        # Append the resulting merge to the merges list
+        merges.append(most_frequent_pair)
+
+        # Add the new merged token to the vocab
+        vocab[256 + len(special_tokens) + i] = most_frequent_pair[0] + most_frequent_pair[1]
+
+    return vocab, merges
+
+if __name__ == "__main__":
+    start_time = time.perf_counter()
+    vocab, merges = train_bpe(
+        input_path="data/TinyStoriesV2-GPT4-valid.txt",
+        vocab_size=10000,
+        special_tokens=["<|endoftext|>"],
+    )
+    elapsed_time = time.perf_counter() - start_time
+    print(f"Time elapsed: {elapsed_time:.2f} seconds")
+    # It ran for 65 seconds for the validation set.
+    # Load and view the pickle files to check them
+    # Do profiling to see how we can improve the speed with leverage
+
+    with open("cs336_basics/vocab.pkl", "wb") as f:
+        pickle.dump(vocab, f)
+    with open("cs336_basics/merges.pkl", "wb") as f:
+        pickle.dump(merges, f)
