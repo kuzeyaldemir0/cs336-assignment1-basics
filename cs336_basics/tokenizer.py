@@ -1,11 +1,10 @@
 import pickle
 import time
+from weakref import ref
 
 import regex as re
 
 from collections import defaultdict
-
-import cs336_basics
 
 
 def int_byte_vocab_init(special_tokens: list[str]) -> dict[int, bytes]:
@@ -17,7 +16,7 @@ def int_byte_vocab_init(special_tokens: list[str]) -> dict[int, bytes]:
     return vocab
 
 
-def pre_token_to_tuple_of_bytes(
+def pretoken_str_to_tuple_of_bytes(
         pre_token_freqs: defaultdict[str, int]
 ) -> dict[tuple[bytes, ...], int]:
     bytes_freqs = {}
@@ -30,54 +29,71 @@ def pre_token_to_tuple_of_bytes(
     return bytes_freqs
 
 
-def successive_pair_freq(bytes_freqs: defaultdict) -> defaultdict:
+def successive_pair_freq(pretoken_freqs: defaultdict):
     pair_freqs = defaultdict(int)
-    for bytes_tuple, occurence in bytes_freqs.items():
+    pair_pretoken_lookup = defaultdict(set)
+    for pretoken, freq in pretoken_freqs.items():
         # Loop over each successive pair
-        for i in range(len(bytes_tuple) - 1):
+        for i in range(len(pretoken) - 1):
             # Add the occurence of that word to the pair's frequency
-            pair_freqs[(bytes_tuple[i], bytes_tuple[i+1])] += occurence
-    return pair_freqs
+            pair_freqs[(pretoken[i], pretoken[i+1])] += freq
+
+            # Use the successive pairs as keys and append the tuple to the list as the value
+            pair_pretoken_lookup[(pretoken[i], pretoken[i+1])].add(pretoken)
+    return pair_freqs, pair_pretoken_lookup
 
 
-def merge_pair(bytes_freqs, pair):
-    new_byte_freqs = {}
-    # Walk through each tuple of bytes, merge bytes objects if they're our pair
-    for bytes_tuple, occurence in bytes_freqs.items():
-        bytes_list = []
+def merge_pair(
+        pretoken_freqs: defaultdict[tuple[bytes, ...], int],
+        pair_freqs: defaultdict[tuple[bytes, bytes], int],
+        pair_pretoken_lookup: defaultdict[tuple[bytes, bytes], set[tuple[bytes, ...]]], 
+        pair: tuple[bytes, bytes]
+):
+    merged_pair = pair[0] + pair[1]
+    matched_pretokens = pair_pretoken_lookup[pair].copy()
+    # pretoken example for a word started with low: (b"lo", b"w")
+    for pretoken in matched_pretokens:
+        merged_pretoken = []
         i = 0
-        if len(bytes_tuple) == 1:
-            bytes_list.append(bytes_tuple[0])
-        while i < len(bytes_tuple) - 1:
+        if len(pretoken) == 1:
+            merged_pretoken.append(pretoken[0])
 
-            # If current successive pair is not our pair,
-            if (bytes_tuple[i], bytes_tuple[i+1]) != pair:
+        # Walk each bytes object inside the pretoken and
+        # create the new pretoken that has our merged pair as one bytes object
+        while i < len(pretoken) - 1:
+            if (pretoken[i], pretoken[i+1]) != pair:
+                # If it's not our pair, append the current bytes object to the new tuple
+                merged_pretoken.append(pretoken[i])
+            elif (pretoken[i], pretoken[i+1]) == pair:
+                # Add our merged pair to the merged_pretoken that accumulates bytes objects one by one
+                merged_pretoken.append(merged_pair)
 
-                # append current bytes object to our list
-                bytes_list.append(bytes_tuple[i])
-
-            # If current successive pair is the pair we want to merge,
-            else:
-
-                # append the merged bytes object to the list
-                bytes_list.append(bytes_tuple[i] + bytes_tuple[i+1])
-
-                # Skip the next bytes object since we merged the 2nd one
+                # Skip next bytes object since we merged it
                 i += 1
-
-            # If we're on the last index we're going iterate
-            if i == len(bytes_tuple) - 2:
-
-                # Add last element to the list too
-                bytes_list.append(bytes_tuple[i+1])
-
-            # Iterate to the next successive pair
+            if i == len(pretoken) - 2:
+                # Add the last element if still no merge in the last index
+                merged_pretoken.append(pretoken[i+1])
             i += 1
 
         # Convert the list to a tuple for it to be a dictionary key
-        new_key = tuple(bytes_list)
-        new_byte_freqs[new_key] = occurence
-    return new_byte_freqs
+        merged_pretoken = tuple(merged_pretoken)
+
+        i = 0
+        while i < len(pretoken) - 1:
+            pair_freqs[pretoken[i], pretoken[i+1]] -= pretoken_freqs[pretoken]
+            pair_pretoken_lookup[pretoken[i], pretoken[i+1]].discard(pretoken)
+            i += 1
+
+        i = 0
+        while i < len(merged_pretoken) - 1:
+            pair_freqs[merged_pretoken[i], merged_pretoken[i+1]] += pretoken_freqs[pretoken]
+            pair_pretoken_lookup[merged_pretoken[i], merged_pretoken[i+1]].add(merged_pretoken)
+            i += 1            
+
+        pretoken_freqs[merged_pretoken] = pretoken_freqs[pretoken]
+        del pretoken_freqs[pretoken]
+
+    del pair_freqs[pair]
 
 
 def train_bpe(
@@ -107,29 +123,27 @@ def train_bpe(
 
     # Pre-tokenize and combine the frequencies of pre-tokens across chunks
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    pre_token_freqs = defaultdict(int)
+    pretoken_freqs = defaultdict(int)
     for chunk in chunks:
         # Pre-tokenize and add the frequency of pre-token
         for match in re.finditer(PAT, chunk):
-            pre_token = match.group()
-            pre_token_freqs[pre_token] += 1
+            pretoken = match.group()
+            pretoken_freqs[pretoken] += 1
 
     # Convert the str type pre-token object to tuple of bytes for each pre-token
-    bytes_freqs = pre_token_to_tuple_of_bytes(pre_token_freqs)
+    pretoken_freqs = pretoken_str_to_tuple_of_bytes(pretoken_freqs)
+    pair_freqs, pair_pretoken_lookup = successive_pair_freq(pretoken_freqs)
 
     # Start merging
     merges = []
     num_merges = vocab_size - (len(special_tokens) + 256)
     for i in range(num_merges):
-        # Count successive pairs of bytes objects in each tuple of bytes across all chunks
-        pair_freqs = successive_pair_freq(bytes_freqs)
-
         # Select the most frequent successive pair across chunks
         # If tied, take the alphabetically greater/latter pair
         most_frequent_pair = max(pair_freqs, key=lambda pair: (pair_freqs[pair], pair))
 
-        # Merge the most frequent pair across all the chunks
-        bytes_freqs = merge_pair(bytes_freqs, most_frequent_pair)
+        # Merge the most frequent pair across all the chunks and change stuff in-place
+        merge_pair(pretoken_freqs, pair_freqs, pair_pretoken_lookup, most_frequent_pair)
 
         # Append the resulting merge to the merges list
         merges.append(most_frequent_pair)
@@ -142,17 +156,15 @@ def train_bpe(
 if __name__ == "__main__":
     start_time = time.perf_counter()
     vocab, merges = train_bpe(
-        input_path="data/TinyStoriesV2-GPT4-valid.txt",
+        input_path="data/TinyStoriesV2-GPT4-train.txt",
         vocab_size=10000,
         special_tokens=["<|endoftext|>"],
     )
     elapsed_time = time.perf_counter() - start_time
-    print(f"Time elapsed: {elapsed_time:.2f} seconds")
-    # It ran for 65 seconds for the validation set.
-    # Load and view the pickle files to check them
-    # Do profiling to see how we can improve the speed with leverage
+    print(f"Total Duration: {elapsed_time:.2f} seconds")
 
-    with open("cs336_basics/vocab.pkl", "wb") as f:
-        pickle.dump(vocab, f)
-    with open("cs336_basics/merges.pkl", "wb") as f:
-        pickle.dump(merges, f)
+    with open("cs336_basics/output/vocab.pkl", "wb") as file:
+        pickle.dump(vocab, file)
+    with open("cs336_basics/output/merges.pkl", "wb") as file:
+        pickle.dump(merges, file)
+                        
