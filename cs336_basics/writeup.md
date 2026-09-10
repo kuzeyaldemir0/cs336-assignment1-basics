@@ -1,32 +1,21 @@
 ## Problem (unicode1): Understanding Unicode
 
-### (a) What Unicode character does chr(0) return?
+(a) '\x00'
 
-Answer: '\x00'
+(b) Its string representation is something like blank/null (not space), maybe created for not-existing strings so it doesn't show when printed compared to its representation given in question (a).
 
-### (b) How does this character’s string representation (__repr__()) differ from its printed representation?
+(c) It acts like nothing is there and probably something for null values that should be represented somehow.
 
-Answer: Its string representation is something like blank/null (not space), maybe created for not-existing strings so it doesn't show when printed compared to its representation given in question (a).
+##  Problem (unicode2): Unicode Encodings
 
-### (c) What happens when this character occurs in text? It may be helpful to play around with the following in your Python interpreter and see if it matches your expectations:
+(a) utf-8's main purpose is decreasing the beginning vocab size as small as possible from the original 153k vocab size of unicode encoding and utf-16 and utf-32 would have less of an advantage than utf-8 for that goal.
 
-Answer: It acts like nothing is there and probably something for null values that should be represented somehow.
+(b) to give an example the input "türkçe" would not work since some encodings correspond to multiple bytes but that function tries to decode each byte object in that list one by one which breaks non-ascii chars that contain multiple bytes such as the example given above.
 
-## Problem (unicode2): Unicode Encodings
+(c) 0, 244 as byte one and two are not directly decodable when concat to a single bytes object.
 
-### (a) What are some reasons to prefer training our tokenizer on UTF-8 encoded bytes, rather than UTF-16 or UTF-32? It may be helpful to compare the output of these encodings for various input strings.
+## Problem (train_bpe_tinystories): BPE Training on TinyStories
 
-Answer: utf-8's main purpose is decreasing the beginning vocab size as small as possible from the original 153k vocab size of unicode encoding and utf-16 and utf-32 would have less of an advantage than utf-8 for that goal.
+(a) Don't know the memory usage but it worken on 24 GB of VRAM or unified memory macbook air m4. The training on the train set took 163 seconds, longest token is accomplishment, yeah if kind of makes sense considering the stories could be focusing on people achieving some stuff and they're all probably English.
 
-### (b) Consider the following (incorrect) function, which is intended to decode a UTF-8 byte string into a Unicode string. Why is this function incorrect? Provide an example of an input byte string that yields incorrect results.
-
-def decode_utf8_bytes_to_str_wrong(bytestring: bytes):
-    return "".join([bytes([b]).decode("utf-8") for b in bytestring])
->>> decode_utf8_bytes_to_str_wrong("hello".encode("utf-8"))
-'hello'
-
-Answer: to give an example the input "türkçe" would not work since some encodings correspond to multiple bytes but that function tries to decode each byte object in that list one by one which breaks non-ascii chars that contain multiple bytes such as the example given above.
-
-### (c) Give a two-byte sequence that does not decode to any Unicode character(s).
-
-Answer: 0, 244 as byte one and two are not directly decodable when concat to a single bytes object.
+(b) max method took 50 seconds of cumtime which is the max except the main functions and merge_pair for the case that took the longest from the helper functions we wrote took 2 seconds of cumulative time which is good considering we called it around 9k times and the whole profiling took 252 seconds.
