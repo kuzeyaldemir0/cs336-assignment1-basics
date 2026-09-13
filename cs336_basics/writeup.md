@@ -19,3 +19,19 @@
 (a) Don't know the memory usage but it worken on 24 GB of VRAM or unified memory macbook air m4. The training on the train set took 163 seconds, longest token is accomplishment, yeah if kind of makes sense considering the stories could be focusing on people achieving some stuff and they're all probably English.
 
 (b) max method took 50 seconds of cumtime which is the max except the main functions and merge_pair for the case that took the longest from the helper functions we wrote took 2 seconds of cumulative time which is good considering we called it around 9k times and the whole profiling took 252 seconds.
+
+## Problem (train_bpe_expts_owt):  BPE Training on OpenWebText
+
+(a) Training took around 10k seconds, and peak memory was around 10gb. Longest token in the vocabulary is b'\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82'
+
+i guess it makes sense since i'm thinking OpenWebText might contain artifacts like these while they were scraping the web etc?
+
+(b) The main difference is the OpenWebText vocab size is 32k while the TinyStories is 10k as specified on the problem sets. Other differences I observed are that the OpenWebText was not very clean like the TinyStroes and there were more interesting and unusual words/terms and more technical stuff perhaps in the final vocab especially close to the end.
+
+## Problem (tokenizer_experiments):  Experiments with tokenizers
+
+(a) TinyStories tokenizer → TinyStories sample: 4.0596 bytes/token. OpenWebText tokenizer → OpenWebText sample: 4.5966 bytes/token.
+
+(b) OpenWebText tokenizer → TinyStories sample: 3.9945 bytes/token. TinyStories tokenizer → OpenWebText sample: 3.1908 bytes/token. I believe the content of the OpenWebText is more generic hence the compression ratio while using that instead of the TinyStories tokenizer on the Tiny Stories validation set didn't drop as much and also we couldn't neglect that the vocab size is 32k. Compression ratio while encoding the OpenWebText sample with the Tiny Stories tokenizer dropped a lot more and i'd explain it as both the smaller vocab and more "story-like" language which wouldn't have been able to encode the "web-like" text effectively as its own trained tokenizer perhaps.
+
+(c) The throughput of our tokenizer in bytes/seconds on a 100 randomly sampled documents from the OpenWebText validation set was 5251.6 bytes/second and at this rate i'd estimate the Pile Dataset (825 GB of text) would take around 4.98 years. We're going to optimize this before moving forward.

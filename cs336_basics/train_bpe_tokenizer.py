@@ -1,9 +1,8 @@
 import pickle
-import time
 
-import regex as re
 
 from collections import defaultdict
+from .pretokenization_example import count_pretoken_freqs
 
 
 def int_byte_vocab_init(special_tokens: list[str]) -> dict[int, bytes]:
@@ -16,10 +15,10 @@ def int_byte_vocab_init(special_tokens: list[str]) -> dict[int, bytes]:
 
 
 def pretoken_str_to_tuple_of_bytes(
-        pre_token_freqs: defaultdict[str, int]
+        pretoken_freqs: defaultdict[str, int]
 ) -> dict[tuple[bytes, ...], int]:
     bytes_freqs = {}
-    for pre_token, occurence in pre_token_freqs.items():
+    for pre_token, occurence in pretoken_freqs.items():
         byte_data = pre_token.encode("utf-8")
 
         # Use a comprehension to split them into single bytes objects
@@ -45,7 +44,7 @@ def successive_pair_freq(pretoken_freqs: defaultdict):
 def merge_pair(
         pretoken_freqs: defaultdict[tuple[bytes, ...], int],
         pair_freqs: defaultdict[tuple[bytes, bytes], int],
-        pair_pretoken_lookup: defaultdict[tuple[bytes, bytes], set[tuple[bytes, ...]]], 
+        pair_pretoken_lookup: defaultdict[tuple[bytes, bytes], set[tuple[bytes, ...]]],
         pair: tuple[bytes, bytes]
 ):
     merged_pair = pair[0] + pair[1]
@@ -87,7 +86,7 @@ def merge_pair(
         while i < len(merged_pretoken) - 1:
             pair_freqs[merged_pretoken[i], merged_pretoken[i+1]] += pretoken_freqs[pretoken]
             pair_pretoken_lookup[merged_pretoken[i], merged_pretoken[i+1]].add(merged_pretoken)
-            i += 1            
+            i += 1
 
         pretoken_freqs[merged_pretoken] = pretoken_freqs[pretoken]
         del pretoken_freqs[pretoken]
@@ -103,34 +102,16 @@ def train_bpe(
 
     # Initialize vocabulary
     vocab = int_byte_vocab_init(special_tokens)
+    print("Vocabulary initialized.")
 
-    # Read the corpus
-    with open(input_path, "r", encoding="utf-8") as f:
-        corpus = f.read()
-
-    # Escape the '|' in special tokens
-    escaped_special_tokens = []
-    for sp_token in special_tokens:
-        escaped_special_tokens.append(re.escape(sp_token))
-
-    # Join all the special tokens with or ('|') operator for the regex pattern
-    special_token_pattern = "|".join(escaped_special_tokens)
-
-    # Split the corpus on each special token
-    chunks = re.split(special_token_pattern, corpus)
-
-    # Pre-tokenize and combine the frequencies of pre-tokens across chunks
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    pretoken_freqs = defaultdict(int)
-    for chunk in chunks:
-        # Pre-tokenize and add the frequency of pre-token
-        for match in re.finditer(PAT, chunk):
-            pretoken = match.group()
-            pretoken_freqs[pretoken] += 1
+    # Count pretoken_freqs
+    pretoken_freqs = count_pretoken_freqs(input_path, 10, special_tokens)
+    print("Pretoken frequencies counted.")
 
     # Convert the str type pre-token object to tuple of bytes for each pre-token
     pretoken_freqs = pretoken_str_to_tuple_of_bytes(pretoken_freqs)
     pair_freqs, pair_pretoken_lookup = successive_pair_freq(pretoken_freqs)
+    print("Pair frequencies counted and pair-pretoken lookup created.")
 
     # Start merging
     merges = []
@@ -148,25 +129,18 @@ def train_bpe(
 
         # Add the new merged token to the vocab
         vocab[256 + len(special_tokens) + i] = most_frequent_pair[0] + most_frequent_pair[1]
-        print(f"Merges Done: {i+1}/{num_merges}")
+        if i % 1000 == 0:
+            print(f"Merges Done: {i+1}/{num_merges}")
 
     return vocab, merges
 
 if __name__ == "__main__":
-    
-    start_time = time.perf_counter()
-    vocab, merges = train_bpe(
-        input_path="data/owt_train.txt",
-        vocab_size=32000,
-        special_tokens=["<|endoftext|>"],
-    )
-    elapsed_time = time.perf_counter() - start_time
-    print(f"Total Duration: {elapsed_time:.2f} seconds")
 
-    with open("cs336_basics/output/owt_vocab.pkl", "wb") as file:
-        pickle.dump(vocab, file)
-    with open("cs336_basics/output/owt_merges.pkl", "wb") as file:
-        pickle.dump(merges, file)
 
-    # Training on TinyStories train set took around 160 seconds
-    # Longest token after training was "accomplishment"
+    with open("cs336_basics/output/owt_vocab.pkl", "rb") as f:
+        vocab = pickle.load(f)
+    with open("cs336_basics/output/owt_merges.pkl", "rb") as f:
+        merges = pickle.load(f)
+
+    longest_token_idx = max(vocab.keys(), key=lambda x:len(vocab[x]))
+    print(vocab[longest_token_idx])

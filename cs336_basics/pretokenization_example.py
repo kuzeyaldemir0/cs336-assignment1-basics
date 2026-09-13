@@ -1,6 +1,9 @@
 import os
 from typing import BinaryIO
 
+from collections import defaultdict
+import regex as re
+
 
 def find_chunk_boundaries(
     file: BinaryIO,
@@ -16,7 +19,7 @@ def find_chunk_boundaries(
     # Get total file size in bytes
     file.seek(0, os.SEEK_END)
     file_size = file.tell()
-    file.seek(0)
+    file.seek(0, os.SEEK_SET)
 
     chunk_size = file_size // desired_num_chunks
 
@@ -27,6 +30,8 @@ def find_chunk_boundaries(
 
     mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
 
+    # Ex: With 4 chunks, there are 5 chunk boundaries,
+    # So bi becomes 1, 2, 3 throughout the loop
     for bi in range(1, len(chunk_boundaries) - 1):
         initial_position = chunk_boundaries[bi]
         file.seek(initial_position)  # Start at boundary guess
@@ -49,14 +54,41 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-## Usage
-with open(..., "rb") as f:
-    num_processes = 4
-    boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+def count_pretoken_freqs(input_path, num_chunks, special_tokens):
+    with open(input_path, "rb") as f:
+        boundaries = find_chunk_boundaries(f, num_chunks, b"<|endoftext|>")
 
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
-        f.seek(start)
-        chunk = f.read(end - start).decode("utf-8", errors="ignore")
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
+        # The following is a serial implementation, but you can parallelize this
+        # by sending each start/end pair to a set of processes.
+
+        pretoken_freqs = defaultdict(int)
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            f.seek(start)
+            chunk = f.read(end - start).decode("utf-8", errors="ignore")
+
+            # Escape the '|' in special tokens
+            escaped_special_tokens = []
+            for sp_token in special_tokens:
+                escaped_special_tokens.append(re.escape(sp_token))
+
+            # Join all the special tokens with or ('|') operator for the regex pattern
+            special_token_pattern = "|".join(escaped_special_tokens)
+
+            # Split the chunk on each special token
+            sp_token_splitted_chunk = re.split(special_token_pattern, chunk)
+
+            for sp_token_separated_str in sp_token_splitted_chunk:
+                # Pretokenize the chunk
+                PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+                for match in re.finditer(PAT, sp_token_separated_str):
+                    pretoken = match.group()
+                    pretoken_freqs[pretoken] += 1
+
+    return pretoken_freqs
+
+if __name__ == "__main__":
+    print(count_pretoken_freqs(
+        "data/TinyStoriesV2-GPT4-train.txt",
+        4,
+        special_tokens=["<|endoftext|>"]
+    ))

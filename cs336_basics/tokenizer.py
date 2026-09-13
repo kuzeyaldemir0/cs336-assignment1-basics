@@ -1,5 +1,7 @@
 import pickle
-
+import os
+import random
+import time
 import regex as re
 
 from collections.abc import Iterable, Iterator
@@ -141,16 +143,30 @@ class Tokenizer:
 
 
 if __name__ == "__main__":
+
     tokenizer = Tokenizer.from_files(
-        "cs336_basics/output/tiny_stories_vocab.pkl",
-        "cs336_basics/output/tiny_stories_merges.pkl",
-        special_tokens=["<|endoftext|>", "<|endoftext|><|endoftext|>"]
+        "cs336_basics/output/owt_vocab.pkl",
+        "cs336_basics/output/owt_merges.pkl",
+        special_tokens=["<|endoftext|>"]
     )
 
-    initial_text = "Hello, how <|endoftext|><|endoftext|> are you?<|endoftext|>"
-    encoded = tokenizer.encode(initial_text)
-    print(encoded)
-    decoded_back = tokenizer.decode(encoded)
-    print(decoded_back)
-    # Check round-trip
-    assert initial_text == decoded_back
+    with open("data/owt_valid.txt", "r", encoding="utf-8") as f:
+        corpus = f.read()
+
+    chunks = corpus.split("<|endoftext|>")
+    rng = random.Random(42)
+    documents = rng.sample(chunks, k=100)
+
+    total_bytes = sum(len(document.encode("utf-8")) for document in documents)
+
+    start_time = time.perf_counter()
+    for document in documents:
+        tokenizer.encode(document)
+    elapsed_seconds = time.perf_counter() - start_time
+    print("Elapsed seconds:", elapsed_seconds)
+
+    throughput = total_bytes / elapsed_seconds
+    print("Throughput:", throughput)
+
+    estimated_hours = ((825 * 10**9) / throughput) / 3600
+    print("Estimated hours to encode the 825gb pile dataset:", estimated_hours)
