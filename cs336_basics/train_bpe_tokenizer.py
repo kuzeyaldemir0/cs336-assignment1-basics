@@ -136,7 +136,6 @@ def train_bpe(
 
 if __name__ == "__main__":
 
-
     with open("cs336_basics/output/owt_vocab.pkl", "rb") as f:
         vocab = pickle.load(f)
     with open("cs336_basics/output/owt_merges.pkl", "rb") as f:

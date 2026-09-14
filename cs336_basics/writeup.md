@@ -34,4 +34,6 @@ i guess it makes sense since i'm thinking OpenWebText might contain artifacts li
 
 (b) OpenWebText tokenizer → TinyStories sample: 3.9945 bytes/token. TinyStories tokenizer → OpenWebText sample: 3.1908 bytes/token. I believe the content of the OpenWebText is more generic hence the compression ratio while using that instead of the TinyStories tokenizer on the Tiny Stories validation set didn't drop as much and also we couldn't neglect that the vocab size is 32k. Compression ratio while encoding the OpenWebText sample with the Tiny Stories tokenizer dropped a lot more and i'd explain it as both the smaller vocab and more "story-like" language which wouldn't have been able to encode the "web-like" text effectively as its own trained tokenizer perhaps.
 
-(c) The throughput of our tokenizer in bytes/seconds on a 100 randomly sampled documents from the OpenWebText validation set was 5251.6 bytes/second and at this rate i'd estimate the Pile Dataset (825 GB of text) would take around 4.98 years. We're going to optimize this before moving forward.
+(c) The throughput of our tokenizer in bytes/seconds on a 100 randomly sampled documents from the OpenWebText validation set was 1710680 bytes/second and at this rate i'd estimate the Pile Dataset (825 GB of text) would take around 134 hours.
+
+(d) Our largest vocabulary has 32,000 tokens, so with 2^16 we have 0 to 65,535 possible values which would mean each token ID we have fits.

@@ -1,7 +1,4 @@
 import pickle
-import os
-import random
-import time
 import regex as re
 
 from collections.abc import Iterable, Iterator
@@ -41,7 +38,10 @@ class Tokenizer:
                         if encoded not in self.reverse_vocab:
                             self.reverse_vocab[encoded] = len(vocab)
                             vocab[len(vocab)] = encoded
-        
+
+        self.merge_priority_lookup = {}
+        for idx, merge in enumerate(merges):
+            self.merge_priority_lookup[merge] = idx
 
     @classmethod
     def from_files(
@@ -99,13 +99,21 @@ class Tokenizer:
                     pretoken_bytes = pretoken.encode("utf-8")
                     pretoken_list_of_bytes = [bytes([b]) for b in pretoken_bytes]
 
-                    for merge in self.merges:
-                        i = 0
-                        while i < len(pretoken_list_of_bytes) - 1:
-                            if merge == (pretoken_list_of_bytes[i], pretoken_list_of_bytes[i+1]):
-                                pretoken_list_of_bytes[i] = pretoken_list_of_bytes[i] + pretoken_list_of_bytes[i+1]
-                                pretoken_list_of_bytes.pop(i+1)
-                            i += 1
+                    i = 0
+                    best_priority = len(self.vocab)
+                    while i < len(pretoken_list_of_bytes) - 1:
+                        pair = (pretoken_list_of_bytes[i], pretoken_list_of_bytes[i+1])
+                        priority = self.merge_priority_lookup.get(pair)
+                        if priority is not None:
+                            if priority < best_priority:
+                                best_priority = priority
+                                merge_idx = i
+                        i += 1
+                        if i == len(pretoken_list_of_bytes) - 1 and best_priority < len(self.vocab):
+                            i = 0
+                            pretoken_list_of_bytes[merge_idx] = pretoken_list_of_bytes[merge_idx] + pretoken_list_of_bytes[merge_idx+1]
+                            pretoken_list_of_bytes.pop(merge_idx+1)
+                            best_priority = len(self.vocab)
                     result.append(pretoken_list_of_bytes)
 
         # Transform the list[list[bytes]] to list[int]
@@ -140,33 +148,3 @@ class Tokenizer:
         ]
         concat_bytes = b"".join(bytes_list)
         return concat_bytes.decode("utf-8", errors="replace")
-
-
-if __name__ == "__main__":
-
-    tokenizer = Tokenizer.from_files(
-        "cs336_basics/output/owt_vocab.pkl",
-        "cs336_basics/output/owt_merges.pkl",
-        special_tokens=["<|endoftext|>"]
-    )
-
-    with open("data/owt_valid.txt", "r", encoding="utf-8") as f:
-        corpus = f.read()
-
-    chunks = corpus.split("<|endoftext|>")
-    rng = random.Random(42)
-    documents = rng.sample(chunks, k=100)
-
-    total_bytes = sum(len(document.encode("utf-8")) for document in documents)
-
-    start_time = time.perf_counter()
-    for document in documents:
-        tokenizer.encode(document)
-    elapsed_seconds = time.perf_counter() - start_time
-    print("Elapsed seconds:", elapsed_seconds)
-
-    throughput = total_bytes / elapsed_seconds
-    print("Throughput:", throughput)
-
-    estimated_hours = ((825 * 10**9) / throughput) / 3600
-    print("Estimated hours to encode the 825gb pile dataset:", estimated_hours)
