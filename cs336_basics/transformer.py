@@ -1,6 +1,9 @@
+from turtle import forward
+from unittest import result
+
 import torch
 
-from einops import einsum
+from einops import einops, einsum, reduce
 
 
 class Linear(torch.nn.Module):
@@ -64,3 +67,67 @@ class Embedding(torch.nn.Module):
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         return self.embedding_lookup[token_ids,:]
+
+class RMSNorm(torch.nn.Module):
+    def __init__(
+            self,
+            d_model: int,
+            eps: float = 1e-5,
+            device: torch.device | None = None,
+            dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+        self.gain = torch.nn.Parameter(
+            torch.ones(
+                d_model,
+                dtype=dtype,
+                device=device
+            )
+        )
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Process an input tensor of shape (batch_size, sequence_length, d_model)
+        and return a tensor of the same shape."""
+
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+
+        sum_across_d_model = einops.reduce(
+            x ** 2,
+            "... d_model -> ... 1",
+            "sum"
+        )
+        rms = (sum_across_d_model / self.d_model + self.eps) ** 0.5
+        result = x / rms * self.gain
+
+        return result.to(in_dtype)
+
+class swiglu_FFN(torch.nn.Module):
+    def __init__(
+            self,
+            d_model: int,
+            d_ff: int,
+    ):
+        super().__init__()
+        self.linear_layer_1 = Linear(d_model, d_ff)
+        self.linear_layer_2 = Linear(d_ff, d_model)
+        self.linear_layer_3 = Linear(d_model, d_ff)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_branch_1 = self.linear_layer_1(x)
+        x_branch_1 = x_branch_1 * torch.sigmoid(x_branch_1)
+
+        x_branch_2 = self.linear_layer_3(x)
+        x = x_branch_1 * x_branch_2
+
+        return self.linear_layer_2(x)
+
+
+if __name__ == "__main__":
+    x = torch.ones([16, 5, 100])
+    RMSNorm_layer = RMSNorm(100)
+    result = RMSNorm_layer(x)
