@@ -1,6 +1,8 @@
 import torch
 
 from einops import einops, einsum, reduce
+from jaxtyping import Bool, Float, Int
+from torch import Tensor
 
 
 class Linear(torch.nn.Module):
@@ -171,11 +173,29 @@ class RoPE(torch.nn.Module):
             "... pairs coords 1 -> ... (pairs coords)"
         )
 
+def softmax(x: torch.Tensor, dim: int) -> torch.Tensor:
+    x = x - torch.max(x, dim=dim, keepdim=True).values
+    x_exp = torch.exp(x)
+    return x_exp / torch.sum(x_exp, dim=dim, keepdim=True)
+
+
+def scaled_dot_product_attention(
+    Q: Float[Tensor, " ... queries d_k"],
+    K: Float[Tensor, " ... keys d_k"],
+    V: Float[Tensor, " ... keys d_v"],
+    mask: Bool[Tensor, " ... queries keys"] | None = None,
+):
+    pre_softmax = einops.einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys") / (K.shape[-1] ** 0.5)
+    if mask is not None:
+        pre_softmax = torch.where(mask, pre_softmax, float("-inf"))
+    softmaxed = softmax(pre_softmax, dim=-1)
+    return einops.einsum(softmaxed, V, "... queries keys, ... keys d_v -> ... queries d_v")
+
+
 if __name__ == "__main__":
-    rope_layer = RoPE(theta=10000.0, d_k=128, max_seq_len=256)
-    x = torch.ones([16, 5, 128])
-    token_positions = torch.arange(80)
-    token_positions = token_positions.reshape([16, 5])
-    rotated_x = rope_layer(x, token_positions)
-    print(rotated_x.shape)
+    q = torch.ones([16, 10, 128])
+    k = torch.ones([16, 10, 128])
+    qk = scaled_dot_product_attention(q, k, k)
+    print(qk.shape)
+
 
