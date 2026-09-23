@@ -15,7 +15,7 @@ class Linear(torch.nn.Module):
     ):
         super().__init__()
 
-        x = torch.empty(
+        empty_init = torch.empty(
             size=[out_features, in_features],
             device=device,
             dtype=dtype
@@ -24,7 +24,7 @@ class Linear(torch.nn.Module):
         std = (2 / (in_features + out_features)) ** 0.5
         self.W = torch.nn.Parameter(
             torch.nn.init.trunc_normal_(
-                x,
+                empty_init,
                 mean=0,
                 std=std,
                 a=-3*std,
@@ -165,7 +165,7 @@ class RoPE(torch.nn.Module):
             x: torch.Tensor,
             token_positions: torch.Tensor
     ) -> torch.Tensor:
-        sliced_rotation_matrix = self.rotation_matrix[token_positions[:]]
+        sliced_rotation_matrix = self.rotation_matrix[token_positions]
         x = einops.rearrange(x, "... (pairs coords) -> ... pairs coords 1", coords=2)
         x = sliced_rotation_matrix @ x
         return einops.rearrange(
@@ -185,11 +185,94 @@ def scaled_dot_product_attention(
     V: Float[Tensor, " ... keys d_v"],
     mask: Bool[Tensor, " ... queries keys"] | None = None,
 ):
-    pre_softmax = einops.einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys") / (K.shape[-1] ** 0.5)
+    pre_softmax = einops.einsum(
+        Q, K,
+        "... query_positions d_k, ... kv_positions d_k -> ... query_positions kv_positions") / (K.shape[-1] ** 0.5
+    )
     if mask is not None:
         pre_softmax = torch.where(mask, pre_softmax, float("-inf"))
-    softmaxed = softmax(pre_softmax, dim=-1)
-    return einops.einsum(softmaxed, V, "... queries keys, ... keys d_v -> ... queries d_v")
+    attention_weights = softmax(pre_softmax, dim=-1)
+    return einops.einsum(
+        attention_weights, V,
+        "... query_positions kv_positions, ... kv_positions d_v -> ... query_positions d_v"
+    )
+
+
+class MultiHead_self_attention(torch.nn.Module):
+    def __init__(
+            self,
+            d_model: int,
+            num_heads: int,
+            max_seq_len: int = None,
+            theta: float = None,
+            token_positions: Int[Tensor, " ... seq_len"] = None,
+            apply_rope: bool = False
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_head = d_model // num_heads
+        self.Q = Linear(d_model, d_model)
+        self.K = Linear(d_model, d_model)
+        self.V = Linear(d_model, d_model)
+        self.output_projection = Linear(d_model, d_model)
+        self.apply_rope = apply_rope
+        if apply_rope:
+            self.RoPE = RoPE(theta, self.d_head, max_seq_len)
+            self.token_positions = token_positions
+
+
+    def forward(self, x):
+        queries = self.Q(x)
+        keys = self.K(x)
+        values = self.V(x)
+        seq_len = queries.shape[-2]
+        # We have Q, K, and V as shape (batch_size, seq_len, d_model)
+
+        # Let's split the d_model into multiple heads for MHA
+        queries = einops.rearrange(
+            queries,
+            "... seq_len (num_heads d_head) -> ... num_heads seq_len d_head",
+            num_heads=self.num_heads,
+            d_head=self.d_head
+        )
+        keys = einops.rearrange(
+            keys,
+            "... seq_len (num_heads d_head) -> ... num_heads seq_len d_head",
+            num_heads=self.num_heads,
+            d_head=self.d_head
+        )
+        values = einops.rearrange(
+            values,
+            "... seq_len (num_heads d_head) -> ... num_heads seq_len d_head",
+            num_heads=self.num_heads,
+            d_head=self.d_head
+        )
+
+        if self.apply_rope:
+            # Apply the same RoPE to each head separately
+            token_positions = einops.rearrange(
+                self.token_positions,
+                "... seq_len -> ... 1 seq_len"
+            )
+            queries = self.RoPE(queries, token_positions)
+            keys = self.RoPE(keys, token_positions)
+
+        boolean_mask = torch.ones(size=(seq_len, seq_len), device=x.device, dtype=torch.bool)
+        causal_mask = torch.tril(boolean_mask)
+        attention_scores = scaled_dot_product_attention(
+            queries,
+            keys,
+            values,
+            causal_mask
+        )
+
+        attention_heads_concated = einops.rearrange(
+            attention_scores,
+            "... num_heads seq_len d_head -> ... seq_len (num_heads d_head)"
+        )
+        return self.output_projection(attention_heads_concated)
+
 
 
 if __name__ == "__main__":
@@ -197,5 +280,3 @@ if __name__ == "__main__":
     k = torch.ones([16, 10, 128])
     qk = scaled_dot_product_attention(q, k, k)
     print(qk.shape)
-
-
