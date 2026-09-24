@@ -11,7 +11,7 @@ from torch import Tensor
 
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.train_bpe_tokenizer import train_bpe
-from cs336_basics.transformer import Embedding, Linear, MultiHead_self_attention, RMSNorm, RoPE, scaled_dot_product_attention, softmax, swiglu_FFN
+from cs336_basics.transformer import Embedding, Linear, MultiHead_self_attention, RMSNorm, RoPE, scaled_dot_product_attention, softmax, swiglu_FFN, transformer_block
 
 
 def run_linear(
@@ -33,7 +33,7 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
     linear = Linear(d_in, d_out)
-    linear.load_state_dict({"W": weights})
+    linear.load_state_dict({"weight": weights})
     return linear(in_features)
 
 
@@ -90,9 +90,9 @@ def run_swiglu(
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
     swiglu = swiglu_FFN(d_model, d_ff)
-    swiglu.linear_layer_1.load_state_dict({"W": w1_weight})
-    swiglu.linear_layer_2.load_state_dict({"W": w2_weight})
-    swiglu.linear_layer_3.load_state_dict({"W": w3_weight})
+    swiglu.w1.load_state_dict({"weight": w1_weight})
+    swiglu.w2.load_state_dict({"weight": w2_weight})
+    swiglu.w3.load_state_dict({"weight": w3_weight})
 
     return swiglu(in_features)
 
@@ -150,10 +150,10 @@ def run_multihead_self_attention(
         implementation with the given QKV projection weights and input features.
     """
     mha = MultiHead_self_attention(d_model, num_heads)
-    mha.Q.load_state_dict({"W": q_proj_weight})
-    mha.K.load_state_dict({"W": k_proj_weight})
-    mha.V.load_state_dict({"W": v_proj_weight})
-    mha.output_projection.load_state_dict({"W": o_proj_weight})
+    mha.q_proj.load_state_dict({"weight": q_proj_weight})
+    mha.k_proj.load_state_dict({"weight": k_proj_weight})
+    mha.v_proj.load_state_dict({"weight": v_proj_weight})
+    mha.output_proj.load_state_dict({"weight": o_proj_weight})
     return mha(in_features)
 
 
@@ -196,14 +196,13 @@ def run_multihead_self_attention_with_rope(
     """
     mha = MultiHead_self_attention(
         d_model, num_heads,
-        max_seq_len, theta,
-        token_positions, apply_rope=True
+        max_seq_len, theta, apply_rope=True
     )
-    mha.Q.load_state_dict({"W": q_proj_weight})
-    mha.K.load_state_dict({"W": k_proj_weight})
-    mha.V.load_state_dict({"W": v_proj_weight})
-    mha.output_projection.load_state_dict({"W": o_proj_weight})
-    return mha(in_features)
+    mha.q_proj.load_state_dict({"weight": q_proj_weight})
+    mha.k_proj.load_state_dict({"weight": k_proj_weight})
+    mha.v_proj.load_state_dict({"weight": v_proj_weight})
+    mha.output_proj.load_state_dict({"weight": o_proj_weight})
+    return mha(in_features, token_positions)
 
 
 def run_rope(
@@ -299,7 +298,12 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    test_transformer = transformer_block(
+        d_model, num_heads, d_ff,
+        context_length=max_seq_len, theta=theta
+    )
+    test_transformer.load_state_dict(weights)
+    return test_transformer(in_features)
 
 
 def run_transformer_lm(
@@ -408,7 +412,7 @@ def run_rmsnorm(
         d_model,
         eps,
     )
-    rms_norm_layer.load_state_dict({"gain": weights})
+    rms_norm_layer.load_state_dict({"weight": weights})
     return rms_norm_layer(in_features)
 
 

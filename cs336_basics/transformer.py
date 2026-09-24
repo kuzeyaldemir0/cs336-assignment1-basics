@@ -7,11 +7,11 @@ from torch import Tensor
 
 class Linear(torch.nn.Module):
     def __init__(
-            self,
-            in_features: int,
-            out_features: int,
-            device: torch.device | None = None,
-            dtype: torch.dtype | None = None
+        self,
+        in_features: int,
+        out_features: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
     ):
         super().__init__()
 
@@ -22,7 +22,7 @@ class Linear(torch.nn.Module):
         )
 
         std = (2 / (in_features + out_features)) ** 0.5
-        self.W = torch.nn.Parameter(
+        self.weight = torch.nn.Parameter(
             torch.nn.init.trunc_normal_(
                 empty_init,
                 mean=0,
@@ -35,16 +35,16 @@ class Linear(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return einsum(
-            x, self.W, "... d_in, d_out d_in -> ... d_out"
+            x, self.weight, "... d_in, d_out d_in -> ... d_out"
         )
 
 class Embedding(torch.nn.Module):
     def __init__(
-            self,
-            num_embeddings,
-            embedding_dim,
-            device: torch.device | None = None,
-            dtype: torch.dtype | None = None
+        self,
+        num_embeddings,
+        embedding_dim,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
     ):
         super().__init__()
 
@@ -69,16 +69,16 @@ class Embedding(torch.nn.Module):
 
 class RMSNorm(torch.nn.Module):
     def __init__(
-            self,
-            d_model: int,
-            eps: float = 1e-5,
-            device: torch.device | None = None,
-            dtype: torch.dtype | None = None
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
     ):
         super().__init__()
         self.d_model = d_model
         self.eps = eps
-        self.gain = torch.nn.Parameter(
+        self.weight = torch.nn.Parameter(
             torch.ones(
                 d_model,
                 dtype=dtype,
@@ -100,45 +100,48 @@ class RMSNorm(torch.nn.Module):
             "sum"
         )
         rms = (sum_across_d_model / self.d_model + self.eps) ** 0.5
-        result = x / rms * self.gain
+        result = x / rms * self.weight
 
         return result.to(in_dtype)
 
 class swiglu_FFN(torch.nn.Module):
     def __init__(
-            self,
-            d_model: int,
-            d_ff: int,
+        self,
+        d_model: int,
+        d_ff: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        self.linear_layer_1 = Linear(d_model, d_ff)
-        self.linear_layer_2 = Linear(d_ff, d_model)
-        self.linear_layer_3 = Linear(d_model, d_ff)
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_branch_1 = self.linear_layer_1(x)
+        x_branch_1 = self.w1(x)
         x_branch_1 = x_branch_1 * torch.sigmoid(x_branch_1)
 
-        x_branch_2 = self.linear_layer_3(x)
+        x_branch_2 = self.w3(x)
         x = x_branch_1 * x_branch_2
 
-        return self.linear_layer_2(x)
+        return self.w2(x)
 
 class RoPE(torch.nn.Module):
     def __init__(
-            self,
-            theta: float,
-            d_k: int,
-            max_seq_len: int,
-            device: torch.device | None = None
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
     ):
         super().__init__()
         # Position indices ranging from (0, max_seq_len)
-        m = torch.arange(max_seq_len, device=device)
+        m = torch.arange(max_seq_len, device=device, dtype=torch.float32)
 
         # Frequencies for each pair in the dimension axis of queries and keys
-        freqs = theta ** (-2 * torch.arange(d_k / 2, device=device) / d_k)
+        freqs = theta ** (-2 * torch.arange(d_k / 2, device=device, dtype=torch.float32) / d_k)
 
         # Calculate all the possible angles and create the T, D_2 matrix
         angles = einops.einsum(m, freqs, "T, D_2 -> T D_2")
@@ -158,12 +161,14 @@ class RoPE(torch.nn.Module):
             cos_negsin=2,
             sin_cos=2
         )
+        if dtype is not None:
+            rotation_matrix = rotation_matrix.to(dtype=dtype)
         self.register_buffer("rotation_matrix", rotation_matrix, persistent=False)
 
     def forward(
-            self,
-            x: torch.Tensor,
-            token_positions: torch.Tensor
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor
     ) -> torch.Tensor:
         sliced_rotation_matrix = self.rotation_matrix[token_positions]
         x = einops.rearrange(x, "... (pairs coords) -> ... pairs coords 1", coords=2)
@@ -200,32 +205,38 @@ def scaled_dot_product_attention(
 
 class MultiHead_self_attention(torch.nn.Module):
     def __init__(
-            self,
-            d_model: int,
-            num_heads: int,
-            max_seq_len: int = None,
-            theta: float = None,
-            token_positions: Int[Tensor, " ... seq_len"] = None,
-            apply_rope: bool = False
+        self,
+        d_model: int,
+        num_heads: int,
+        context_length: int = None,
+        theta: float = None,
+        apply_rope: bool = False,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
         self.d_head = d_model // num_heads
-        self.Q = Linear(d_model, d_model)
-        self.K = Linear(d_model, d_model)
-        self.V = Linear(d_model, d_model)
-        self.output_projection = Linear(d_model, d_model)
+        self.q_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.k_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.v_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.output_proj = Linear(d_model, d_model, device=device, dtype=dtype)
         self.apply_rope = apply_rope
         if apply_rope:
-            self.RoPE = RoPE(theta, self.d_head, max_seq_len)
-            self.token_positions = token_positions
+            self.RoPE = RoPE(
+                theta, self.d_head, context_length, device=device, dtype=dtype
+            )
 
 
-    def forward(self, x):
-        queries = self.Q(x)
-        keys = self.K(x)
-        values = self.V(x)
+    def forward(
+        self,
+        x,
+        token_positions: Int[Tensor, " ... seq_len"] = None
+    ):
+        queries = self.q_proj(x)
+        keys = self.k_proj(x)
+        values = self.v_proj(x)
         seq_len = queries.shape[-2]
         # We have Q, K, and V as shape (batch_size, seq_len, d_model)
 
@@ -251,9 +262,14 @@ class MultiHead_self_attention(torch.nn.Module):
 
         if self.apply_rope:
             # Apply the same RoPE to each head separately
+            if token_positions is None:
+                token_positions = torch.arange(
+                    seq_len, device=x.device
+                ).unsqueeze(dim=0)
             token_positions = einops.rearrange(
-                self.token_positions,
+                token_positions,
                 "... seq_len -> ... 1 seq_len"
+                # Add one more batch dimension since we want same rotation across different heads
             )
             queries = self.RoPE(queries, token_positions)
             keys = self.RoPE(keys, token_positions)
@@ -271,8 +287,33 @@ class MultiHead_self_attention(torch.nn.Module):
             attention_scores,
             "... num_heads seq_len d_head -> ... seq_len (num_heads d_head)"
         )
-        return self.output_projection(attention_heads_concated)
+        return self.output_proj(attention_heads_concated)
 
+
+class transformer_block(torch.nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        context_length: int = None,
+        theta: float = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
+    ):
+        super().__init__()
+        self.ln1 = RMSNorm(d_model, eps=1e-5, device=device, dtype=dtype)
+        self.attn = MultiHead_self_attention(
+            d_model, num_heads, context_length,
+            theta=theta, apply_rope=True,
+            device=device, dtype=dtype
+        )
+        self.ln2 = RMSNorm(d_model, eps=1e-5, device=device, dtype=dtype)
+        self.ffn = swiglu_FFN(d_model, d_ff, device=device, dtype=dtype)
+
+    def forward(self, x):
+        x = x + self.attn(self.ln1(x))
+        return x + self.ffn(self.ln2(x))
 
 
 if __name__ == "__main__":
