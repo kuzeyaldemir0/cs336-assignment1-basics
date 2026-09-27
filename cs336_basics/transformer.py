@@ -54,7 +54,7 @@ class Embedding(torch.nn.Module):
             dtype=dtype
         )
 
-        self.embedding_lookup = torch.nn.Parameter(
+        self.weight = torch.nn.Parameter(
             torch.nn.init.trunc_normal_(
                 empty_embedding_lookup,
                 mean=0,
@@ -65,7 +65,7 @@ class Embedding(torch.nn.Module):
         )
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        return self.embedding_lookup[token_ids,:]
+        return self.weight[token_ids,:]
 
 class RMSNorm(torch.nn.Module):
     def __init__(
@@ -94,12 +94,12 @@ class RMSNorm(torch.nn.Module):
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
-        sum_across_d_model = einops.reduce(
+        mean_square = einops.reduce(
             x ** 2,
             "... d_model -> ... 1",
-            "sum"
+            "mean"
         )
-        rms = (sum_across_d_model / self.d_model + self.eps) ** 0.5
+        rms = (mean_square + self.eps) ** 0.5
         result = x / rms * self.weight
 
         return result.to(in_dtype)
@@ -132,13 +132,13 @@ class RoPE(torch.nn.Module):
         self,
         theta: float,
         d_k: int,
-        max_seq_len: int,
+        context_length: int,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None
     ):
         super().__init__()
-        # Position indices ranging from (0, max_seq_len)
-        m = torch.arange(max_seq_len, device=device, dtype=torch.float32)
+        # Position indices ranging from (0, context_length)
+        m = torch.arange(context_length, device=device, dtype=torch.float32)
 
         # Frequencies for each pair in the dimension axis of queries and keys
         freqs = theta ** (-2 * torch.arange(d_k / 2, device=device, dtype=torch.float32) / d_k)
@@ -208,8 +208,8 @@ class MultiHead_self_attention(torch.nn.Module):
         self,
         d_model: int,
         num_heads: int,
-        context_length: int = None,
-        theta: float = None,
+        context_length: int | None = None,
+        theta: float = 10000.0,
         apply_rope: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
@@ -296,8 +296,8 @@ class transformer_block(torch.nn.Module):
         d_model: int,
         num_heads: int,
         d_ff: int,
-        context_length: int = None,
-        theta: float = None,
+        context_length: int,
+        theta: float = 10000.0,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None
     ):
@@ -314,6 +314,46 @@ class transformer_block(torch.nn.Module):
     def forward(self, x):
         x = x + self.attn(self.ln1(x))
         return x + self.ffn(self.ln2(x))
+
+
+class transformer_lm(torch.nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        num_layers: int,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        theta: float = 10000.0,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.token_embeddings = Embedding(
+            num_embeddings=vocab_size, embedding_dim=d_model,
+            device=device, dtype=dtype
+        )
+        self.layers = torch.nn.ModuleList([
+            transformer_block(
+                d_model, num_heads, d_ff,
+                context_length, theta=theta,
+                device=device, dtype=dtype
+            ) for _ in range(num_layers)
+        ])
+        self.ln_final = RMSNorm(d_model, device=device, dtype=dtype)
+        self.lm_head = Linear(
+            in_features=d_model, out_features=vocab_size,
+            device=device, dtype=dtype
+        )
+
+
+    def forward(self, x):
+        x = self.token_embeddings(x)
+        for layer in self.layers:
+            x = layer(x)
+        x = self.ln_final(x)
+        return self.lm_head(x)
 
 
 if __name__ == "__main__":

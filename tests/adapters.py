@@ -11,7 +11,7 @@ from torch import Tensor
 
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.train_bpe_tokenizer import train_bpe
-from cs336_basics.transformer import Embedding, Linear, MultiHead_self_attention, RMSNorm, RoPE, scaled_dot_product_attention, softmax, swiglu_FFN, transformer_block
+from cs336_basics.transformer import Embedding, Linear, MultiHead_self_attention, RMSNorm, RoPE, scaled_dot_product_attention, softmax, swiglu_FFN, transformer_block, transformer_lm
 
 
 def run_linear(
@@ -56,7 +56,7 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
     embedding = Embedding(vocab_size, d_model)
-    embedding.load_state_dict({"embedding_lookup": weights})
+    embedding.load_state_dict({"weight": weights})
     return embedding(token_ids)
 
 
@@ -385,7 +385,13 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    test_lm = transformer_lm(
+        vocab_size, context_length, num_layers,
+        d_model, num_heads, d_ff,
+        theta=rope_theta
+    )
+    test_lm.load_state_dict(weights)
+    return test_lm(in_indices)
 
 
 def run_rmsnorm(
