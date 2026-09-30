@@ -11,7 +11,7 @@ from torch import Tensor
 
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.train_bpe_tokenizer import train_bpe
-from cs336_basics.transformer import Embedding, Linear, MultiHead_self_attention, RMSNorm, RoPE, scaled_dot_product_attention, softmax, swiglu_FFN, transformer_block, transformer_lm
+from cs336_basics.transformer import Embedding, Linear, MultiHead_self_attention, RMSNorm, RoPE, cross_entropy_loss, scaled_dot_product_attention, softmax, swiglu_FFN, transformer_block, transformer_lm
 
 
 def run_linear(
@@ -490,7 +490,7 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    return cross_entropy_loss(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:

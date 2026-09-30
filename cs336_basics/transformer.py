@@ -355,9 +355,51 @@ class transformer_lm(torch.nn.Module):
         x = self.ln_final(x)
         return self.lm_head(x)
 
+def cross_entropy_loss(
+    logits: Float[Tensor, " batch_size vocab_size"],
+    targets: Int[Tensor, " batch_size"]
+) -> Float[Tensor, ""]:
+
+    logits = einops.rearrange(
+        logits,
+        "... vocab_size -> (...) vocab_size"
+    )
+    targets = einops.rearrange(
+        targets,
+        "... -> (...)"
+    )
+
+    # Left part of the equation in the docstring
+    batch_size, vocab_size = logits.shape
+    batch_indices = torch.arange(end=batch_size, dtype=torch.int32)
+    target_logits = logits[batch_indices, targets].unsqueeze(dim=-1)
+    max_logits = einops.reduce(
+        logits,
+        "batch_size vocab_size -> batch_size 1",
+        "max"
+    )
+    left_part = max_logits - target_logits
+
+    # Right part of the equation in the docstring
+    logits = logits - max_logits
+    exp_logits = torch.exp(logits)
+    right_part = torch.log(einops.reduce(
+        exp_logits,
+        "batch_size vocab_size -> batch_size 1",
+        "sum"
+    ))
+    avg_loss = einops.reduce(
+        left_part + right_part,
+        "batch_size 1 -> ", # scalar output
+        "mean"
+    )
+    return avg_loss
+
+
 
 if __name__ == "__main__":
-    q = torch.ones([16, 10, 128])
-    k = torch.ones([16, 10, 128])
-    qk = scaled_dot_product_attention(q, k, k)
-    print(qk.shape)
+    # batch_size = 2, vocab_size = 4
+    logits = torch.Tensor([[10.2, 1.3, 2.4, 4.3], [1.8, 11.7, 101.9, 12.1]]) # shape: (2, 4)
+    targets = torch.Tensor([0, 2]).to(torch.int32) # shape: (2, )
+    print(cross_entropy_loss(logits, targets))
+
