@@ -117,3 +117,11 @@ Comments: Attention and FFN increased slightly while LM Head kept dropping it's 
 | Total | $\approx 3.517e+12$ FLOPs ($\approx 100\%$) | $\approx 1.336e+14$ FLOPs ($\approx 100\%$) |
 
 Comments: Attention reached almost the double percentage it had in the 1,024 context length when context length has increased to 16,384. FFN and LM head shares of the total FLOPs both dropped more than half.
+
+## Problem (learning_rate_tuning):  Tuning the learning rate
+
+1. 10 training steps, learning rate = 1e1, initial loss: 25.78, final loss = 3.46
+2. 10 training steps, learning rate = 1e2, initial loss: 29.49, final loss = 3.51e-23
+3. 10 training steps, learning rate = 1e3, initial loss: 23.59, final loss = 2.18e+18
+
+As visible in the loss comparison above, the learning rate 1e1 decreases the loss successfully but not too fast. Learning rate 1e2 decreases the loss to almost 0 in the 10 steps and looks like the best learning rate from these 3 for this amount of steps and data. Learning rate 1e3 is too big and results in divergence which is basically loss increasing as seen in the final loss of that experiment.
