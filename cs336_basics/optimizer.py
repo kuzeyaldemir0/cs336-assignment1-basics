@@ -1,5 +1,6 @@
 from collections.abc import Callable, Iterable
 from typing import Optional
+import numpy as np
 import torch
 import math
 
@@ -67,10 +68,10 @@ class AdamW(torch.optim.Optimizer):
 
                 # Compute adjusted learning rate for iteration t
                 t = state.get("t", 1)
-                lr *= ((1 - beta_2 ** t) ** 0.5) / (1 - beta_1 ** t)
+                lr_step_t = lr * ((1 - beta_2 ** t) ** 0.5) / (1 - beta_1 ** t)
                 
                 # Apply moment-adjusted weight updates
-                p.data -= lr * moment_1 / ((moment_2 ** 0.5) + eps)
+                p.data -= lr_step_t * moment_1 / ((moment_2 ** 0.5) + eps)
 
                 # Update the states of each parameter
                 state["t"] = t + 1
@@ -78,14 +79,40 @@ class AdamW(torch.optim.Optimizer):
                 state["moment_2"] = moment_2
         return loss
 
+def cosine_lr_scheduler(it, lr_max, lr_min, warmup_it, cosine_cycle_it):
+    """
+    parameters:
+        it: iteration number to get the learning rate for
+        lr_max: the maximum learning rate
+        lr_min: the minimum/final learning rate
+        warmup_it: the number of iterations to linearly warm-up the learning rate.
+        cosine_cycle_iters: the number of cosine annealing iterations.
+    """
+    if it < warmup_it:
+        return (it / warmup_it) * lr_max
+    elif warmup_it <= it <= cosine_cycle_it:
+        cos_anneal = (
+            (1 + math.cos(((it - warmup_it) * math.pi) / (cosine_cycle_it - warmup_it))) / 2
+        )
+        return lr_min + cos_anneal * (lr_max - lr_min)
+    return lr_min
+
+def gradient_clipping(
+        parameters: Iterable[torch.nn.Parameter],
+        max_l2_norm: float
+) -> None:
+    params = list(parameters)
+    g = 0.0
+    for p in params:
+        if p.grad is None:
+            continue
+        g += torch.linalg.vector_norm(p.grad.data) ** 2
+    g = g ** 0.5
+    if g >= max_l2_norm:
+        for p in params:
+            if p.grad is None:
+                continue
+            p.grad.data *= max_l2_norm / (g + 1e-6)
 
 if __name__ == "__main__":
-    weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
-    opt = SGD([weights], lr=1e3)
-    for t in range(10):
-        opt.zero_grad()  # Reset the gradients for all learnable parameters.
-        loss = (weights**2).mean() # Compute a scalar loss value.
-        print(loss.cpu().item())
-
-        loss.backward() # Run backward pass, which computes gradients.
-        opt.step() # Run optimizer step.
+    ...
