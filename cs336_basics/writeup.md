@@ -125,3 +125,133 @@ Comments: Attention reached almost the double percentage it had in the 1,024 con
 3. 10 training steps, learning rate = 1e3, initial loss: 23.59, final loss = 2.18e+18
 
 As visible in the loss comparison above, the learning rate 1e1 decreases the loss successfully but not too fast. Learning rate 1e2 decreases the loss to almost 0 in the 10 steps and looks like the best learning rate from these 3 for this amount of steps and data. Learning rate 1e3 is too big and results in divergence which is basically loss increasing as seen in the final loss of that experiment.
+
+## Problem (adamw_accounting):  Resource accounting for training with AdamW
+
+(a)
+Let B = batch_size, T = context_length, V = vocab_size, D = d_model, H = num_heads, L = num_layers, 
+and d_ff = 8 * D / 3
+
+Input embeddings:
+- parameters: V * D
+- gradients: V * D
+- optimizer states: 2(V * D)
+- TOTAL: 4(V * D)
+
+RMSNorm memory:
+- parameters: D
+- gradients: D
+- optimizer states: 2 * D
+- activations:
+    - (x ** 2): B * T * D
+    - mean_square: B * T
+    - (mean_square + self.eps): B * T
+    - rms: B * T
+    - (x / rms): B * T * D
+    - (x / rms * self.weight): B * T * D
+    - total: 3(B * T * D) + 3(B * T)
+- TOTAL: 4D + 3(B * T * D) + 3(B * T)
+
+Multi-head self-attention:
+- parameters: 4 * D * D
+- gradients: 4 * D * D
+- optimizer states: 8 * D * D
+- activations:
+    - queries: B * T * D
+    - keys: B * T * D
+    - values: B * T * D
+    - pre_softmax: B * H * T * T
+    - attention_weights: B * H * T * T
+    - attention_result: B * H * T * d_head = B * T * D
+    - output_proj: B * T * D
+    - total: 5(B * T * D) + 2(B * H * T * T)
+- TOTAL: 16(D * D) + 5(B * T * D) + 2(B * H * T * T)
+
+Position-wise feed-forward:
+- parameters: 3 * D * d_ff
+- gradients: 3 * D * d_ff
+- optimizer states: 6 * D * d_ff
+- activations:
+    - branch_1: B * T * d_ff
+    - torch.sigmoid(branch_1): B * T * d_ff
+    - branch_1 * torch.sigmoid(branch_1): B * T * d_ff
+    - branch_2: B * T * d_ff
+    - x: B * T * d_ff
+    - self.w2(x): B * T * D
+    - total: 5(B * T * d_ff) + (B * T * D) = (43 / 3) * (B * T * D)
+- TOTAL: 32(D * D) + 43/3(B * T * D)
+
+Output Embedding:
+- parameters: D * V
+- gradients: D * V
+- optimizer states: 2(D * V)
+- activations: B * T * V
+- TOTAL: 4(D * V) + (B * T * V)
+
+Cross-entropy: 
+- activations:
+    - target_logits: B * T
+    - max_logits: B * T
+    - left_part: B * T
+    - exp_logits: B * T * V
+    - einops.reduce: B * T
+    - right_part: B * T
+    - left_part + right_part: B * T
+- TOTAL: 6(B * T) + (B * T * V)
+
+Total of transformer lm:
+1. Input embeddings TOTAL: 4(D * V)
+
+2. Transformer blocks TOTAL: n_layers * [RMSNorm + MHA + RMSNorm + FFN] = 
+L * [8D + 76/3(B * T * D) + 6(B * T) + 48(D * D) + 2(B * H * T * T)] = 
+8(D * L) + 76/3(B * T * D * L) + 6(B * T * L) + 48(D * D * L) + 2(B * H * T * T * L)
+
+3. Final RMSNorm TOTAL: 4D + 3(B * T * D) + 3(B * T)
+
+4. Output Embedding TOTAL: 4(D * V) + (B * T * V)
+
+5. Cross-entropy TOTAL: 6(B * T) + (B * T * V)
+
+Everything in total: 8(D * V) + 8(D * L) + 76/3(B * T * D * L) + 6(B * T * L) + 48(D * D * L) + 
+2(B * H * T * T * L) + 4D + 3(B * T * D) + 9(B * T) + 2(B * T * V)
+
+$$\text{Parameters} = 2DV + 12D^2L + 2DL + D$$
+$$\text{Gradients} = 2DV + 12D^2L + 2DL + D$$
+$$\text{Optimizer state} = 4DV + 24D^2L + 4DL + 2D$$
+$$\text{Activations} = L\left(\tfrac{76}{3}BTD + 6BT + 2BHT^2\right) + 3BTD + 9BT + 2BTV$$
+$$\text{Total} = 4 \cdot \text{Parameters} + \text{Activations}$$
+
+(b)
+
+(6542150400 * 4bytes) + ((4617022464 * B) * 4bytes) = 26168601600 + (18468089856)B bytes
+
+Final Expression: $(18.47 \times B)\:\text{GB} + 26.17\:\text{GB}$
+
+So, if we have 80 GB memory, then the maximum batch_size is 2 since with batch size being 2, it's about 63.1 GB, but with batch size being 3, it's about 81.57 GB, which is a little over 80 GB, and this doesn't even include some stuff like overhead that these libraries might have, such as PyTorch.
+
+(c)
+
+AdamW step/update is a (constant) × (number of parameters) operations with no matrix multiplication so if we don't take forward or the backward pass then it's negligible compared to them. The expression including the forward and backward pass and assuming backward pass has twice the FLOPs of the forward pass:
+
+c = (2P) + (3P) + (4P) + (5P) = 14P in total for where P is number of parameters
+
+$$
+\text{FLOPs} = 3B(L(4DT^2 + 8TD + 24TD^2) + 2TDV) + 14(2DV + 12D^2L + 2DL + D)
+$$
+
+(d)
+
+An NVIDIA H100 GPU has a theoretical peak of 495 teraFLOP/s for “float32” operations. Assuming we are able to get 50% MFU, we have 247.5 teraFLOP/s which is 247.5e+12 FLOP/s. With a batch size of 1024 and 400K steps, our total FLOPs where steps is S:
+
+$$
+\text{FLOPs} = S(3B(L(4DT^2 + 8TD + 24TD^2) + 2TDV) + 
+14(2DV + 12D^2L + 2DL + D))
+$$
+
+substituting the GPT-2 XL values into the expression:
+
+$$
+\text{FLOPs} \approx{4.31 \times 10^{21}}
+$$
+
+Total time to complete that: $\approx{4837}$ hours $\approx {201.5}$ days

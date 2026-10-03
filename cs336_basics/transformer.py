@@ -100,9 +100,7 @@ class RMSNorm(torch.nn.Module):
             "mean"
         )
         rms = (mean_square + self.eps) ** 0.5
-        result = x / rms * self.weight
-
-        return result.to(in_dtype)
+        return (x / rms * self.weight).to(in_dtype)
 
 class swiglu_FFN(torch.nn.Module):
     def __init__(
@@ -119,11 +117,11 @@ class swiglu_FFN(torch.nn.Module):
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_branch_1 = self.w1(x)
-        x_branch_1 = x_branch_1 * torch.sigmoid(x_branch_1)
+        branch_1 = self.w1(x)
+        branch_1 = branch_1 * torch.sigmoid(branch_1)
 
-        x_branch_2 = self.w3(x)
-        x = x_branch_1 * x_branch_2
+        branch_2 = self.w3(x)
+        x = branch_1 * branch_2
 
         return self.w2(x)
 
@@ -372,7 +370,7 @@ def cross_entropy_loss(
     left_part = max_logits - target_logits
 
     # Right part of the equation
-    logits = logits - max_logits
+    logits -= max_logits
     exp_logits = torch.exp(logits)
     right_part = torch.log(einops.reduce(
         exp_logits,
