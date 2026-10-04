@@ -12,7 +12,7 @@ from torch import Tensor
 from cs336_basics.optimizer import AdamW, cosine_lr_scheduler, gradient_clipping
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.train_bpe_tokenizer import train_bpe
-from cs336_basics.train_model import data_loader
+from cs336_basics.train_model import data_loader, load_checkpoint, save_checkpoint
 from cs336_basics.transformer import Embedding, Linear, MultiHead_self_attention, RMSNorm, RoPE, cross_entropy_loss, scaled_dot_product_attention, softmax, swiglu_FFN, transformer_block, transformer_lm
 
 
@@ -561,7 +561,7 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    save_checkpoint(model, optimizer, iteration, out)
 
 
 def run_load_checkpoint(
@@ -582,7 +582,7 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    return load_checkpoint(src, model, optimizer)
 
 
 def get_tokenizer(
