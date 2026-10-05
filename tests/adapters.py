@@ -12,7 +12,8 @@ from torch import Tensor
 from cs336_basics.optimizer import AdamW, cosine_lr_scheduler, gradient_clipping
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.train_bpe_tokenizer import train_bpe
-from cs336_basics.train_model import data_loader, load_checkpoint, save_checkpoint
+from cs336_basics.data_loader import data_loader
+from cs336_basics.checkpoint import load_checkpoint, save_checkpoint
 from cs336_basics.transformer import Embedding, Linear, MultiHead_self_attention, RMSNorm, RoPE, cross_entropy_loss, scaled_dot_product_attention, softmax, swiglu_FFN, transformer_block, transformer_lm
 
 
