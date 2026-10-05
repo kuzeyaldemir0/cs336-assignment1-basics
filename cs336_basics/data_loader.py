@@ -8,9 +8,9 @@ from torch import Tensor
 
 def data_loader(
     dataset: npt.NDArray, 
-    batch_size:int, 
-    context_length:int, 
-    device: str
+    batch_size: int, 
+    context_length: int, 
+    device: torch.device | str
 ) -> tuple[Tensor, Tensor]:
 
     # Sample integers for the starting index of the input sequence

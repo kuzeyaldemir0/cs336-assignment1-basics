@@ -358,9 +358,12 @@ def cross_entropy_loss(
     targets: Int[Tensor, " batch_size"]
 ) -> Float[Tensor, ""]:
 
+    logits = einops.rearrange(logits, "... vocab_size -> (...) vocab_size")
+    targets = einops.rearrange(targets, "... -> (...)")
+
     # Left part of the equation
     batch_size, vocab_size = logits.shape
-    batch_indices = torch.arange(end=batch_size, dtype=torch.int32)
+    batch_indices = torch.arange(end=batch_size, dtype=torch.int32).to(logits.device)
     target_logits = logits[batch_indices, targets].unsqueeze(dim=-1)
     max_logits = einops.reduce(
         logits,
@@ -370,8 +373,8 @@ def cross_entropy_loss(
     left_part = max_logits - target_logits
 
     # Right part of the equation
-    logits -= max_logits
-    exp_logits = torch.exp(logits)
+    subtracted_logits = logits - max_logits
+    exp_logits = torch.exp(subtracted_logits)
     right_part = torch.log(einops.reduce(
         exp_logits,
         "batch_size vocab_size -> batch_size 1",

@@ -167,3 +167,6 @@ data/
 
 # macOS metadata
 .DS_Store
+
+# Model checkpoint
+checkpoints/
