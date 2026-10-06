@@ -170,3 +170,6 @@ data/
 
 # Model checkpoint
 checkpoints/
+
+# Weights & Biases
+wandb/

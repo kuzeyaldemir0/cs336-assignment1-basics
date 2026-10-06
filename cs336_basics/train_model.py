@@ -3,6 +3,7 @@ import argparse
 import torch
 
 import numpy as np
+import wandb
 
 from cs336_basics.data_loader import data_loader
 from cs336_basics.optimizer import AdamW, gradient_clipping, cosine_lr_scheduler
@@ -50,6 +51,7 @@ def train(model, optim, device, args):
         )
         logits = model(inputs)
         loss = cross_entropy_loss(logits, targets)
+        wandb.log({"train_loss": loss.item()}, step=i)
         if i % args.eval_steps == 0:
             print(f"Train loss at iteration {i}: {loss.item():.4f}")
 
@@ -66,6 +68,7 @@ def train(model, optim, device, args):
                 )
                 logits = model(inputs)
                 loss = cross_entropy_loss(logits, targets)
+                wandb.log({"val_loss": loss.item()}, step=i)
 
                 print(f"Valid loss at iteration {i}: {loss.item():.4f}")
 
@@ -127,6 +130,7 @@ def generate(
 
 if __name__ == "__main__":
     args = parser.parse_args()
+    wandb.init(project="cs336-a1", config=vars(args))
     device = torch.device("mps")
     
     # Instantiate the tokenizer from saved vocab and merges
@@ -151,7 +155,6 @@ if __name__ == "__main__":
         params=model.parameters(),
         lr=args.learning_rate,
     )
-    generate(
-        tokenizer, model, prompt="hello world",
-        max_output_tokens=10, temperature=0.8, top_p=0.9, device=device
-    )
+    train(model, optim, device, args)
+
+    wandb.finish()
