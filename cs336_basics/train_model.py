@@ -16,8 +16,6 @@ from cs336_basics.checkpoint import save_checkpoint, load_checkpoint
 2. Get batches of data with np.memmap
 3. Do a forward pass, calculate the loss, do the backward pass, 
 log the results, make the optimizer step, and repeat.
-4. When done with the iterations in step 3, log the metrics, 
-and save the checkpoint.
 """
 
 VOCAB_PATH = "cs336_basics/output/tiny_stories_vocab.pkl"
@@ -34,7 +32,8 @@ parser.add_argument("--iterations", type=int, required=True)
 parser.add_argument("--batch_size", type=int, required=True)
 parser.add_argument("--learning_rate", type=float, required=True)
 parser.add_argument("--eval_steps", type=int, required=True)
-parser.add_argument("--checkpoint_steps", type=int, required=True)
+parser.add_argument("-eval_batch_count", type=int, default=50)
+parser.add_argument("--cosine_lr_scheduler", type=bool, default=True)
 
 
 def train(model, optim, device, args):
@@ -51,31 +50,37 @@ def train(model, optim, device, args):
         )
         logits = model(inputs)
         loss = cross_entropy_loss(logits, targets)
-        wandb.log({"train_loss": loss.item()}, step=i)
-        if i % args.eval_steps == 0:
-            print(f"Train loss at iteration {i}: {loss.item():.4f}")
-
         loss.backward()
         optim.step()
         optim.zero_grad()
 
-        if i % args.eval_steps == 0:
-            # Implement averaging more than one validation batches to reduce the noise
-            with torch.no_grad():
-                inputs, targets = data_loader(
-                    val_data, batch_size=args.batch_size,
-                    context_length=args.context_length, device=device
+        if args.cosine_lr_scheduler:
+            for group in optim.param_groups:
+                group["lr"] = cosine_lr_scheduler(
+                    it=i, lr_max=1e-2, lr_min=1e-4,
+                    warmup_it=(args.iterations * 0.2),
+                    cosine_cycle_it=args.iterations
                 )
-                logits = model(inputs)
-                loss = cross_entropy_loss(logits, targets)
-                wandb.log({"val_loss": loss.item()}, step=i)
 
-                print(f"Valid loss at iteration {i}: {loss.item():.4f}")
+        wandb.log({"train_loss": loss.item()}, step=i)
+        if i % args.eval_steps == 0:
+            print(f"Train loss at iteration {i}: {loss.item():.4f}")
 
-        if i % args.checkpoint_steps == 0 and i != 0:
-            save_checkpoint(model, optim, iteration=i, out=f"checkpoints/iteration_{i}.pt")
+            # Calculate val loss averaged over batches
+            with torch.no_grad():
+                val_loss = 0
+                for _ in range(args.eval_batch_count):
+                    inputs, targets = data_loader(
+                        val_data, batch_size=args.batch_size,
+                        context_length=args.context_length, device=device
+                    )
+                    logits = model(inputs)
+                    loss = cross_entropy_loss(logits, targets)
+                    val_loss += loss.item()
+                val_loss /= args.eval_batch_count
+                wandb.log({"val_loss": val_loss}, step=i)
 
-    torch.save(model.state_dict(), "checkpoints/final_model.pt")
+                print(f"Valid loss at iteration {i}: {val_loss:.4f}")
 
 def generate(
     tokenizer,
@@ -130,7 +135,7 @@ def generate(
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    wandb.init(project="cs336-a1", config=vars(args))
+    wandb.init(project="cs336-a1", config=vars(args), name="1000-iterations")
     device = torch.device("mps")
     
     # Instantiate the tokenizer from saved vocab and merges
@@ -156,5 +161,4 @@ if __name__ == "__main__":
         lr=args.learning_rate,
     )
     train(model, optim, device, args)
-
     wandb.finish()

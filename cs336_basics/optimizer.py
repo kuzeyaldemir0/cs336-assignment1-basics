@@ -1,6 +1,5 @@
 from collections.abc import Callable, Iterable
 from typing import Optional
-import numpy as np
 import torch
 import math
 
@@ -86,7 +85,7 @@ def cosine_lr_scheduler(it, lr_max, lr_min, warmup_it, cosine_cycle_it):
         lr_max: the maximum learning rate
         lr_min: the minimum/final learning rate
         warmup_it: the number of iterations to linearly warm-up the learning rate.
-        cosine_cycle_iters: the number of cosine annealing iterations.
+        cosine_cycle_iters: iteration number to check to continue cosine or not
     """
     if it < warmup_it:
         return (it / warmup_it) * lr_max
@@ -113,6 +112,3 @@ def gradient_clipping(
             if p.grad is None:
                 continue
             p.grad.data *= max_l2_norm / (g + 1e-6)
-
-if __name__ == "__main__":
-    ...
