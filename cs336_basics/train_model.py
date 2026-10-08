@@ -23,17 +23,19 @@ MERGES_PATH = "cs336_basics/output/tiny_stories_merges.pkl"
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--context_length", type=int, required=True)
 parser.add_argument("--num_layers", type=int, required=True)
 parser.add_argument("--num_heads", type=int, required=True)
 parser.add_argument("--d_model", type=int, required=True)
 parser.add_argument("--d_ff", type=int, required=True)
-parser.add_argument("--iterations", type=int, required=True)
+parser.add_argument("--context_length", type=int, required=True)
 parser.add_argument("--batch_size", type=int, required=True)
-parser.add_argument("--learning_rate", type=float, required=True)
-parser.add_argument("--eval_steps", type=int, required=True)
-parser.add_argument("-eval_batch_count", type=int, default=50)
+parser.add_argument("--total_steps", type=int, required=True)
+parser.add_argument("--warmup_steps", type=int, default=None)
+parser.add_argument("--init_lr", type=float, required=True)
+parser.add_argument("--max_lr", type=float, required=True)
+parser.add_argument("--min_lr", type=float, required=True)
 parser.add_argument("--cosine_lr_scheduler", type=bool, default=True)
+parser.add_argument("--run_name", type=str, default=None)
 
 
 def train(model, optim, device, args):
@@ -43,7 +45,15 @@ def train(model, optim, device, args):
     val_path = pathlib.Path("data/tiny_stories_valid_tokens.npy")
     val_data = np.load(val_path, mmap_mode="r")
 
-    for i in range(args.iterations):
+    eval_steps = args.total_steps * 0.1
+    eval_batch_count = round((
+        len(val_data) / args.batch_size / args.context_length 
+    ) * 0.1)
+
+    if args.warmup_steps is None:
+        args.warmup_steps = args.total_steps / 0.1
+
+    for i in range(args.total_steps):
         inputs, targets = data_loader(
             train_data, batch_size=args.batch_size,
             context_length=args.context_length, device=device
@@ -57,19 +67,21 @@ def train(model, optim, device, args):
         if args.cosine_lr_scheduler:
             for group in optim.param_groups:
                 group["lr"] = cosine_lr_scheduler(
-                    it=i, lr_max=1e-2, lr_min=1e-4,
-                    warmup_it=(args.iterations * 0.2),
-                    cosine_cycle_it=args.iterations
+                    it=i, 
+                    lr_max=args.max_lr,
+                    lr_min=args.min_lr,
+                    warmup_it=args.warmup_steps,
+                    cosine_cycle_it=args.total_steps
                 )
 
         wandb.log({"train_loss": loss.item()}, step=i)
-        if i % args.eval_steps == 0:
+        if i % eval_steps == 0:
             print(f"Train loss at iteration {i}: {loss.item():.4f}")
 
             # Calculate val loss averaged over batches
             with torch.no_grad():
                 val_loss = 0
-                for _ in range(args.eval_batch_count):
+                for _ in range(eval_batch_count):
                     inputs, targets = data_loader(
                         val_data, batch_size=args.batch_size,
                         context_length=args.context_length, device=device
@@ -77,7 +89,7 @@ def train(model, optim, device, args):
                     logits = model(inputs)
                     loss = cross_entropy_loss(logits, targets)
                     val_loss += loss.item()
-                val_loss /= args.eval_batch_count
+                val_loss /= eval_batch_count
                 wandb.log({"val_loss": val_loss}, step=i)
 
                 print(f"Valid loss at iteration {i}: {val_loss:.4f}")
@@ -135,7 +147,7 @@ def generate(
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    wandb.init(project="cs336-a1", config=vars(args), name="1000-iterations")
+    wandb.init(project="cs336-a1", config=vars(args), group="lr-sweep", name=args.run_name)
     device = torch.device("mps")
     
     # Instantiate the tokenizer from saved vocab and merges
@@ -158,7 +170,7 @@ if __name__ == "__main__":
 
     optim = AdamW(
         params=model.parameters(),
-        lr=args.learning_rate,
+        lr=args.init_lr,
     )
     train(model, optim, device, args)
     wandb.finish()
