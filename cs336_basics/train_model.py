@@ -45,7 +45,7 @@ def train(model, optim, device, args):
     val_path = pathlib.Path("data/tiny_stories_valid_tokens.npy")
     val_data = np.load(val_path, mmap_mode="r")
 
-    eval_steps = args.total_steps * 0.1
+    eval_steps = 200
     eval_batch_count = round((
         len(val_data) / args.batch_size / args.context_length 
     ) * 0.1)
@@ -76,9 +76,7 @@ def train(model, optim, device, args):
 
         wandb.log({"train_loss": loss.item()}, step=i)
         if i % eval_steps == 0:
-            print(f"Train loss at iteration {i}: {loss.item():.4f}")
-
-            # Calculate val loss averaged over batches
+            # Calculate val loss averaged over multiple batches
             with torch.no_grad():
                 val_loss = 0
                 for _ in range(eval_batch_count):
@@ -92,7 +90,7 @@ def train(model, optim, device, args):
                 val_loss /= eval_batch_count
                 wandb.log({"val_loss": val_loss}, step=i)
 
-                print(f"Valid loss at iteration {i}: {val_loss:.4f}")
+    torch.save(model.state_dict(), f"{args.run_name}.pth")
 
 def generate(
     tokenizer,
@@ -147,7 +145,7 @@ def generate(
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    wandb.init(project="cs336-a1", config=vars(args), group="lr-sweep", name=args.run_name)
+    wandb.init(project="cs336-a1", config=vars(args), group="batch-size-sweep", name=args.run_name)
     device = torch.device("mps")
     
     # Instantiate the tokenizer from saved vocab and merges
