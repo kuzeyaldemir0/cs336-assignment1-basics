@@ -262,7 +262,11 @@ Total time to complete that: $\approx{4837}$ hours $\approx {201.5}$ days
 
 (b) I agree as I previously stated, the best learning rate was a little below the learning rate where it diverged at the beginning and allowed faster convergence. Also the run where it started to diverge still tried to converge later on because we decay the learning rate and it lowered down to a lower value after some iterations but we still had double the val loss we had compared to our best run at 1000 iterations.
 
-## Problem (batch_size_experiment):  Batch size variations
+## Problem (batch_size_experiment): Batch size variations
+
+## TODO!!!
+
+## Problem (generate):  Generate text
 
 Text Dump:
 Once upon a time, there was a little girl named Lucy. She had a big, soft blanket that she loved very much. One day, she went to the park with her blanket and her blanket.
