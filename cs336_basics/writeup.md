@@ -264,4 +264,11 @@ Total time to complete that: $\approx{4837}$ hours $\approx {201.5}$ days
 
 ## Problem (batch_size_experiment):  Batch size variations
 
+Text Dump:
+Once upon a time, there was a little girl named Lucy. She had a big, soft blanket that she loved very much. One day, she went to the park with her blanket and her blanket.
+In the park, Lucy saw a boy named Tim. Tim had a toy that he loved very much. He played with his toys and had lots of fun. Lucy was very happy and said, "Thank you, Tim!"
+But Lucy was not happy. She said, "I hate my blanket. It's too big and too big for you." Tim felt sad and angry. He said, "I'm sorry, Lucy. I will not do it again."
+Then, Lucy had an idea. She said, "I promise, Tim. I will try my best to be more careful next time." Tim was happy. They played together and had lots of fun.
+<|endoftext|>
 
+I feel like decreasing the temperature causes logical errors and mixing words like "key" and "toy" or using them interchangably even though they're not synonyms. Decreasing the top-p is increasing the chances we're going to get the same output for the same input and little things change in the outputs when the top-p is low.
