@@ -255,3 +255,13 @@ $$
 $$
 
 Total time to complete that: $\approx{4837}$ hours $\approx {201.5}$ days
+
+## Problem (learning_rate):  Tune the learning rate
+
+(a) We have the learning curves associated with multiple learning rates in the W&B workspace for all our experiments. The model with the validation loss below 2.00 is under the checkpoints folder which is ignored by git since it's a large file. I targeted below 2.00 as instructed since I have a macbook air m4 as the GPU. My learning rate search strategy was trying out as large values as we can, just before we reach the values where training diverges since if we can learn the beginning period quicker and then also decay the learning rate quicker it both was able to get from the starting point of 9 to 3-4 val loss faster and then because we also decayed it faster by making the final learning rate smaller it was also able to converge and still improve after that first initial learning period and decaying the learning rate also helped with continuous improvement on the val loss in my opinion. I was able to reach 1.88 val loss within 3400 steps with my best setup. Batch size was 32 and context length was 256 throughout the experiments to keep them consistent with your given experiment to reference.
+
+(b) I agree as I previously stated, the best learning rate was a little below the learning rate where it diverged at the beginning and allowed faster convergence. Also the run where it started to diverge still tried to converge later on because we decay the learning rate and it lowered down to a lower value after some iterations but we still had double the val loss we had compared to our best run at 1000 iterations.
+
+## Problem (batch_size_experiment):  Batch size variations
+
+

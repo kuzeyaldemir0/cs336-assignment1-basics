@@ -96,6 +96,7 @@ def generate(
     tokenizer,
     model: torch.nn.Module,
     prompt: str,
+    context_length: int,
     max_output_tokens: int,
     temperature: float,
     top_p: float,
@@ -106,9 +107,15 @@ def generate(
     encoded = tokenizer.encode(prompt)
     
     # 2) Add batch dimension
-    inputs = torch.Tensor(encoded).to(dtype=torch.int32, device=device).unsqueeze(0)
+    inputs = torch.Tensor(encoded).to(
+        dtype=torch.int32, device=device
+    ).unsqueeze(0)
     
-    for _ in range(max_output_tokens):    
+    for _ in range(max_output_tokens): 
+
+        if inputs.shape[-1] >= context_length:
+            print("CONTEXT IS FULL!!!")
+            break
         
         # 3) Input them to model for getting the logits
         logits = model(inputs)
@@ -116,21 +123,24 @@ def generate(
         # 4) Apply temperature scaling and softmax
         logits /= temperature
         probs = softmax(logits, dim=-1)
+        next_token_probs = probs[0, -1]
 
-        # 5) Apply top-p to get the truncated and apply softmax again
-        values, indices = torch.sort(probs[0, -1], dim=-1, descending=True)
+        # 5) Apply top-p to get the truncated probs and renormalize
+        values, indices = torch.sort(next_token_probs, dim=-1, descending=True)
         prob_acc = 0.0
         i = 0
-        while prob_acc < top_p:
+        while prob_acc < top_p and i < next_token_probs.shape[-1]:
             prob_acc += values[i]
             i += 1
         keep_indices = indices[:i]
 
-        dont_keep_mask = torch.ones_like(probs[0, -1], dtype=torch.bool)
+        # Create a mask for the ones we truncate and make their probs 0
+        dont_keep_mask = torch.ones_like(next_token_probs, dtype=torch.bool)
         dont_keep_mask[keep_indices] = False
-        probs[0, -1, dont_keep_mask] = 0
-        probs[0, -1, :] /= torch.sum(probs[0, -1, :])
-        probs = softmax(probs, dim=-1)
+        next_token_probs[dont_keep_mask] = 0
+        
+        # Renormalize so that that the probs sum to 1
+        next_token_probs /= torch.sum(next_token_probs)
 
         # 6) Sample one token from that distribution
         selected_token = torch.multinomial(probs[0, -1], num_samples=1).unsqueeze(0)
@@ -140,12 +150,14 @@ def generate(
         
         if tokenizer.decode([selected_token.item()]) == "<|endoftext|>":
             break
+
     print(tokenizer.decode(inputs.squeeze(dim=0).tolist()))
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    wandb.init(project="cs336-a1", config=vars(args), group="batch-size-sweep", name=args.run_name)
+    
+    # wandb.init(project="cs336-a1", config=vars(args), group="batch-size-sweep", name=args.run_name)
     device = torch.device("mps")
     
     # Instantiate the tokenizer from saved vocab and merges
@@ -170,5 +182,20 @@ if __name__ == "__main__":
         params=model.parameters(),
         lr=args.init_lr,
     )
+
+
+    state_dict = torch.load(
+        "checkpoints/lr_sweep/4000-steps-increase-max-init-lr.pth",
+        map_location=torch.device("mps")
+    )
+    model.load_state_dict(state_dict)
+    generate(
+        tokenizer, model, "Once upon a time, there was a little girl named Alice",
+        context_length=args.context_length,
+        max_output_tokens=300, temperature=0.8, top_p=0.8, device=device        
+    )
+
+    """
     train(model, optim, device, args)
     wandb.finish()
+    """
