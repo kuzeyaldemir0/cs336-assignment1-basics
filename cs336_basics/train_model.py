@@ -93,7 +93,7 @@ def train(model, optim, device, args):
                 # Save the checkpoint with the best validation loss
                 if val_loss <= best_val_loss:
                     best_val_loss = val_loss
-                    torch.save(model.state_dict(), f"{args.run_name}.pth")
+                    save_checkpoint(model, optim, iteration=i, out=f"checkpoints/{args.run_name}.pth")
             model.train()
 
 def generate(
@@ -180,19 +180,14 @@ if __name__ == "__main__":
         params=model.parameters(),
         lr=args.init_lr,
     )
-
     """
-    state_dict = torch.load(
-        "checkpoints/lr_sweep/4000-steps-increase-max-init-lr.pth",
-        map_location=torch.device("mps")
-    )
-    model.load_state_dict(state_dict)
+    # Loads the model in-place
+    iteration = load_checkpoint("checkpoints/batch_size_sweep/B=64_steps=2500.pth", model, optim)
     generate(
         tokenizer, model, "Once upon a time, there was a little girl named Alice",
         context_length=args.context_length,
         max_output_tokens=300, temperature=0.8, top_p=0.8, device=device        
     )
-    """
-    
+    """    
     train(model, optim, device, args)
     wandb.finish()
